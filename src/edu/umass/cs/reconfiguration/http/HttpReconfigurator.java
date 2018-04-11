@@ -1,5 +1,6 @@
 package edu.umass.cs.reconfiguration.http;
 
+import static edu.umass.cs.reconfiguration.http.HTTPUtil.*;
 import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
@@ -18,19 +19,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.DecoderResult;
-import io.netty.handler.codec.http.DefaultFullHttpResponse;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.codec.http.HttpHeaderNames;
-import io.netty.handler.codec.http.HttpHeaderValues;
-import io.netty.handler.codec.http.HttpObject;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.codec.http.HttpResponseEncoder;
-import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.handler.codec.http.*;
 import io.netty.handler.codec.http.cookie.Cookie;
 import io.netty.handler.codec.http.cookie.ServerCookieDecoder;
 import io.netty.handler.codec.http.cookie.ServerCookieEncoder;
@@ -43,6 +32,7 @@ import io.netty.util.CharsetUtil;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateException;
 import java.util.HashSet;
 import java.util.List;
@@ -431,6 +421,37 @@ public class HttpReconfigurator {
 
 		@Override
 		protected void channelRead0(ChannelHandlerContext ctx, Object msg) {
+		  if (msg instanceof HttpContent && msg instanceof HttpRequest) {
+        HttpRequest httpRequest = (HttpRequest) msg;
+        HttpMethod method = httpRequest.method();
+        boolean keepAlive = HttpUtil.isKeepAlive(httpRequest);
+
+        // Message for CORS headers, just return the CORS headers in this message
+        if (isCORSPreflightRequest(method)) {
+          handleCORSPreflightRequest(ctx, keepAlive);
+          return;
+        }
+
+        if (method == HttpMethod.POST) {
+          String data = ((HttpContent) request).content().toString(StandardCharsets.UTF_8);
+
+          try {
+            JSONObject json = new JSONObject(data);
+            ReconfiguratorRequest crp = toReconfiguratorRequest(json, ctx.channel());
+            String response = this.rcFunctions.sendRequest(crp).toString();
+
+            writeHTTPResponse(ctx, keepAlive, response, OK);
+
+          } catch (HTTPException | JSONException e) {
+            FullHttpResponse httpResponse = new DefaultFullHttpResponse(HTTP_1_1, BAD_REQUEST);
+            ctx.writeAndFlush(httpResponse);
+            e.printStackTrace();
+          }
+
+          return;
+        }
+      }
+
 			if (msg instanceof HttpRequest) {
 				HttpRequest request = this.request = (HttpRequest) msg;
 				buf.setLength(0);
