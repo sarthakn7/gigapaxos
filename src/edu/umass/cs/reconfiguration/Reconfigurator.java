@@ -236,7 +236,7 @@ public class Reconfigurator<NodeIDType> implements
 	protected ActiveReplica<NodeIDType> getReconfigurableReconfiguratorAsActiveReplica() {
 		return new ActiveReplica<NodeIDType>(this.DB,
 				this.consistentNodeConfig.getUnderlyingNodeConfig(),
-				this.messenger);
+				this.messenger, true);
 	}
 
 	private static final Level debug = Level.FINE;

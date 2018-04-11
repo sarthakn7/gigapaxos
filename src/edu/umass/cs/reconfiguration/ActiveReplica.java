@@ -24,6 +24,7 @@ import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.net.ssl.SSLException;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -145,6 +147,7 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 	private final AggregateDemandProfiler demandProfiler;
 	private final boolean noReporting;
 	private boolean recovering = true;
+	private HTTPActiveReplica HTTPActiveReplica;
 
 	private static final Logger log = (ReconfigurationConfig.getLogger());
 
@@ -156,7 +159,7 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 	@SuppressWarnings("unchecked")
 	private ActiveReplica(AbstractReplicaCoordinator<NodeIDType> appC,
 			ReconfigurableNodeConfig<NodeIDType> nodeConfig,
-			SSLMessenger<NodeIDType, ?> messenger, boolean noReporting) {
+			SSLMessenger<NodeIDType, ?> messenger, boolean noReporting, boolean isReconfigurator) {
 		this.appCoordinator = (AbstractReplicaCoordinator<NodeIDType>)
 				wrapCoordinator(appC.setStopCallback(
 				// setting default callback is optional
@@ -189,6 +192,11 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 				this.appCoordinator.getARRCNodesAsString());
 
 		// initInstrumenter();
+
+		// Initialize HTTP server if this is not a reconfigurator and ENABLE_HTTP is true in config
+		if (!isReconfigurator && Config.getGlobalBoolean(RC.ENABLE_HTTP)) {
+			this.protocolExecutor.submit(() -> initHTTPServer(false));
+		}
 	}
 
 	protected static AbstractReplicaCoordinator<?> wrapCoordinator(
@@ -212,6 +220,25 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 			e.printStackTrace();
 		}
 		return coordinator;
+	}
+
+	private void initHTTPServer(boolean ssl) {
+		InetSocketAddress me = this.messenger.getListeningSocketAddress();
+		try {
+			int httpPort = ReconfigurationConfig.getHTTPPort(me.getPort());
+			InetSocketAddress httpSocketAddress = new InetSocketAddress(me.getAddress(), httpPort);
+
+			this.HTTPActiveReplica = new HTTPActiveReplica(this, httpSocketAddress, ssl);
+
+			// TODO: start HTTPS server here as well
+
+		} catch (CertificateException | InterruptedException | SSLException e) {
+			if (!(e instanceof InterruptedException)) { // close
+				e.printStackTrace();
+			}
+			// throw new IOException(e);
+			// eat up exceptions until HTTP server is stable
+		}
 	}
 
 	/**
@@ -387,21 +414,36 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 		this(appC, nodeConfig, messenger, false);
 	}
 
+	protected ActiveReplica(AbstractReplicaCoordinator<NodeIDType> appC,
+													ReconfigurableNodeConfig<NodeIDType> nodeConfig,
+													SSLMessenger<NodeIDType, ?> messenger, boolean isReconfigurator) {
+		this(appC, nodeConfig, messenger, false, isReconfigurator);
+	}
+
 	class SenderAndRequest implements ExecutedCallback {
 		final InetSocketAddress csa;
 		final Request request;
 		final boolean isCoordinated;
 		final InetSocketAddress mysa;
 		final long recvTime;
+		final ResponseSender responseSender;
 
 		SenderAndRequest(Request request, InetSocketAddress isa,
 				InetSocketAddress mysa, long recvTime) {
+			this(request, isa, mysa, recvTime, null);
+		}
+
+		SenderAndRequest(Request request, InetSocketAddress isa,
+										 InetSocketAddress mysa, long recvTime,
+										 ResponseSender responseSender) {
 			this.csa = isa;
 			this.request = request;
 			this.mysa = mysa;
 			this.recvTime = recvTime;
-			this.isCoordinated = isCoordinated(request);
+			this.isCoordinated = ActiveReplica.isCoordinated(request);
+			this.responseSender = responseSender;
 		}
+
 
 		@Override
 		public void executed(Request request, boolean handled) {
@@ -497,11 +539,21 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 										.getSummary(), senderAndRequest.csa,
 								isCoordinated ? "coordinated" : "",
 								request.getSummary() });
-				int written = ((JSONMessenger<?>) this.messenger).sendClient(
-						senderAndRequest.csa,
-						response instanceof Byteable ? ((Byteable) response)
-								.toBytes() : response, senderAndRequest.mysa);
-				if (written > 0)
+
+				boolean sent;
+				if (senderAndRequest.responseSender != null) {
+					sent = senderAndRequest.responseSender.sendResponse(response);
+				} else {
+					int written = ((JSONMessenger<?>) this.messenger).sendClient(
+							senderAndRequest.csa,
+							response instanceof Byteable ? ((Byteable) response)
+									.toBytes() : response, senderAndRequest.mysa);
+
+					sent = written > 0;
+				}
+
+
+				if (sent)
 					if (isCoordinated)
 						AppInstrumenter.sentResponseCoordinated(request);
 					else
@@ -634,7 +686,7 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 
 	// TODO: unused, remove
 	@SuppressWarnings("unused")
-	private Request getRequest(JSONObject jsonObject)
+	Request getRequest(JSONObject jsonObject)
 			throws RequestParseException, JSONException {
 		long t = System.nanoTime();
 		if (jsonObject instanceof JSONMessenger.JSONObjectWrapper)
@@ -772,6 +824,7 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 		this.protocolExecutor.stop();
 		this.messenger.stop();
 		this.appCoordinator.stop();
+		this.HTTPActiveReplica.close();
 	}
 
 	// /////////////// Start of protocol task handler
@@ -1085,7 +1138,7 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 
 	/* ****************** Private methods below ******************* */
 
-	private boolean handRequestToApp(Request request, ExecutedCallback callback) {
+	boolean handRequestToApp(Request request, ExecutedCallback callback) {
 		long t = System.nanoTime();
 		boolean handled = false;
 		try {
