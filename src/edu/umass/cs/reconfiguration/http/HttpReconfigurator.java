@@ -433,7 +433,7 @@ public class HttpReconfigurator {
         }
 
         if (method == HttpMethod.POST) {
-          String data = ((HttpContent) request).content().toString(StandardCharsets.UTF_8);
+          String data = ((HttpContent) msg).content().toString(StandardCharsets.UTF_8);
 
           try {
             JSONObject json = new JSONObject(data);
