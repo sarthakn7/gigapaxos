@@ -684,9 +684,16 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 		return false; // neither reconfiguration packet nor app request
 	}
 
+	Request getRequest(JSONObject jsonObject)
+			throws RequestParseException {
+		String stringified = jsonObject.toString();
+		// TODO: instrument as happening in below method ?
+		return this.appCoordinator.getRequest(stringified);
+	}
+
 	// TODO: unused, remove
 	@SuppressWarnings("unused")
-	Request getRequest(JSONObject jsonObject)
+	Request getRequestDeprecated(JSONObject jsonObject)
 			throws RequestParseException, JSONException {
 		long t = System.nanoTime();
 		if (jsonObject instanceof JSONMessenger.JSONObjectWrapper)
@@ -824,7 +831,10 @@ public class ActiveReplica<NodeIDType> implements ReconfiguratorCallback,
 		this.protocolExecutor.stop();
 		this.messenger.stop();
 		this.appCoordinator.stop();
-		this.HTTPActiveReplica.close();
+
+		if (this.HTTPActiveReplica != null) {
+			this.HTTPActiveReplica.close();
+		}
 	}
 
 	// /////////////// Start of protocol task handler
