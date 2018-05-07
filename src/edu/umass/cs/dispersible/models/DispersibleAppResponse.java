@@ -17,12 +17,29 @@ public class DispersibleAppResponse implements ClientRequest {
   private String serviceName;
   private IntegerPacketType packetType;
   private DispersibleResponseCode responseCode;
+  private String appResponse;
+
+  public DispersibleAppResponse(JSONObject jsonObject) throws JSONException {
+    this(new DispersibleAppRequest(jsonObject));
+    responseCode = DispersibleResponseCode.valueOf(jsonObject.getString(RESPONSE_CODE.name()));
+    if (jsonObject.has(APP_RESPONSE.name())) {
+      appResponse = jsonObject.getString(APP_RESPONSE.name());
+    }
+  }
 
   DispersibleAppResponse(DispersibleAppRequest request, DispersibleResponseCode responseCode) {
+    this(request);
+    this.responseCode = responseCode;
+
+  }
+
+  DispersibleAppResponse(DispersibleAppRequest request) {
     this.requestId = request.getRequestID();
     this.serviceName = request.getServiceName();
     this.packetType = request.getRequestType();
-    this.responseCode = responseCode;
+    if (request.getDispersedAppRequest() != null) {
+      appResponse = ((ClientRequest) request.getDispersedAppRequest()).getResponse().toString();
+    }
   }
 
   @Override
@@ -52,6 +69,9 @@ public class DispersibleAppResponse implements ClientRequest {
       jsonObject.put(RESPONSE_CODE.name(), responseCode.name());
       jsonObject.put(SERVICE_NAME.name(), serviceName);
       jsonObject.put(REQUEST_ID.name(), requestId);
+      if (appResponse != null) {
+        jsonObject.put(APP_RESPONSE.name(), appResponse);
+      }
       jsonObject.put(JSONPacket.PACKET_TYPE, packetType.getInt());
     } catch (JSONException e) {
       throw new IllegalStateException(e);

@@ -32,12 +32,29 @@ public class DispersibleAppRequest extends JSONPacket implements
     requestId = json.getLong(REQUEST_ID.name());
     serviceName = json.getString(SERVICE_NAME.name());
 
-    if (packetType == DispersiblePacketType.NEW_APP) {
+    if (packetType == DispersiblePacketType.NEW_APP || json.has("RESPONSE_CODE")) {
       dispersedAppRequestString = null;
     } else {
       dispersedAppRequestString = json.getString(APP_REQUEST.name());
       // TODO: make change in js client to put request in this
     }
+  }
+
+  public DispersibleAppRequest(DispersiblePacketType packetType, String serviceName) {
+    super(packetType);
+    this.requestId = (long) (Math.random() * Long.MAX_VALUE);
+    this.packetType = packetType;
+    this.serviceName = serviceName;
+    this.dispersedAppRequestString = "";
+  }
+
+  public DispersibleAppRequest(DispersiblePacketType packetType, String serviceName, ReplicableRequest replicableRequest) {
+    super(packetType);
+    this.requestId = (long) (Math.random() * Long.MAX_VALUE);
+    this.packetType = packetType;
+    this.serviceName = serviceName;
+    this.dispersedAppRequestString = replicableRequest.toString();
+    this.dispersedAppRequest = replicableRequest;
   }
 
   @Override

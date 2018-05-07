@@ -7,5 +7,6 @@ public enum DispersibleKeys {
   SERVICE_NAME,
   REQUEST_ID,
   APP_REQUEST,
+  APP_RESPONSE,
   RESPONSE_CODE
 }
