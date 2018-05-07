@@ -23,11 +23,7 @@ public class App {
   @Column
   private ByteBuffer jar;
 
-  public App(String service, String appClassName, String jarFileName, ByteBuffer jar) {
-    this.service = service;
-    this.appClassName = appClassName;
-    this.jarFileName = jarFileName;
-    this.jar = jar;
+  public App() {
   }
 
   public String getService() {

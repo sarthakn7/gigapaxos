@@ -44,6 +44,10 @@ public class DispersibleApp implements Replicable, Reconfigurable {
   private Map<String, Replicable> apps = new HashMap<>();
 
   public DispersibleApp() {
+    initializeAppDao();
+  }
+
+  private void initializeAppDao() {
     // TODO: get below from config
     String host = "127.0.0.1";
     int port = 9042;
@@ -198,7 +202,7 @@ public class DispersibleApp implements Replicable, Reconfigurable {
       replicableApp = initializeReplicableClassFromJar(filePath, app.getAppClassName());
       apps.put(serviceName, replicableApp);
       return Optional.of(replicableApp);
-    } catch (ClassNotFoundException | IllegalAccessException | MalformedURLException | InstantiationException e) {
+    } catch (ClassNotFoundException | IllegalAccessException | InstantiationException | IOException e) {
       e.printStackTrace();
       return Optional.empty();
     }
@@ -206,6 +210,7 @@ public class DispersibleApp implements Replicable, Reconfigurable {
 
   private void createFile(Path filePath, ByteBuffer content) {
     try {
+      Files.createDirectories(filePath.getParent());
       BufferedOutputStream stream =
           new BufferedOutputStream(new FileOutputStream(new File(filePath.toString())));
       stream.write(content.array());
@@ -217,9 +222,9 @@ public class DispersibleApp implements Replicable, Reconfigurable {
 
   private Replicable initializeReplicableClassFromJar(Path jarFilePath, String className)
       throws ClassNotFoundException, IllegalAccessException, InstantiationException,
-             MalformedURLException {
-    File myJar = new File(jarFilePath.toString());
-    URLClassLoader child = new URLClassLoader(new URL[]{myJar.toURI().toURL()}, this.getClass().getClassLoader());
+             IOException {
+    File jar = new File(jarFilePath.toString());
+    URLClassLoader child = new URLClassLoader(new URL[]{jar.toURI().toURL()}, this.getClass().getClassLoader());
     Class classToLoad = Class.forName(className, true, child);
     return (Replicable) classToLoad.newInstance();
   }
