@@ -22,9 +22,9 @@ import org.json.JSONObject;
 /**
  * @author Sarthak Nandi on 24/4/18.
  */
-public class DispersibleAppClient extends ReconfigurableAppClientAsync<DispersibleAppRequest> {
+public class DispersibleAppTestClient extends ReconfigurableAppClientAsync<DispersibleAppRequest> {
 
-  public DispersibleAppClient() throws IOException {
+  public DispersibleAppTestClient() throws IOException {
     super();
   }
 
@@ -46,13 +46,13 @@ public class DispersibleAppClient extends ReconfigurableAppClientAsync<Dispersib
     String serviceName = "LinWritesLocReads";
     String initialState = "20";
 
-    DispersibleAppClient dispersibleAppClient = new DispersibleAppClient();
+    DispersibleAppTestClient dispersibleAppTestClient = new DispersibleAppTestClient();
 
     try {
       // TODO: confirm usage of state
       System.out.println("Sending create service request");
       RequestFuture<ClientReconfigurationPacket> createServiceFuture =
-          dispersibleAppClient.sendRequest(new CreateServiceName(serviceName, initialState));
+          dispersibleAppTestClient.sendRequest(new CreateServiceName(serviceName, initialState));
 
       ClientReconfigurationPacket response = createServiceFuture.get(20, TimeUnit.SECONDS);
 
@@ -64,14 +64,14 @@ public class DispersibleAppClient extends ReconfigurableAppClientAsync<Dispersib
       throw new RuntimeException(e);
     }
 
-    Request response = dispersibleAppClient.sendRequest(createNewAppRequest(serviceName));
+    Request response = dispersibleAppTestClient.sendRequest(createNewAppRequest(serviceName));
     System.out.println("Response : " + response);
 
-    response = dispersibleAppClient.sendRequest(createExecuteRequest(serviceName, 401));
+    response = dispersibleAppTestClient.sendRequest(createExecuteRequest(serviceName, 401));
 
     System.out.println("Response : " + response);
 
-    response = dispersibleAppClient.sendRequest(createExecuteRequest(serviceName, 402));
+    response = dispersibleAppTestClient.sendRequest(createExecuteRequest(serviceName, 402));
 
     System.out.println("Response : " + response);
   }
