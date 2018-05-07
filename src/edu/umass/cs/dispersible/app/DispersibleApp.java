@@ -3,6 +3,8 @@ package edu.umass.cs.dispersible.app;
 import static edu.umass.cs.dispersible.models.DispersiblePacketType.*;
 import static edu.umass.cs.dispersible.models.DispersibleResponseCode.*;
 
+import edu.umass.cs.dispersible.db.App;
+import edu.umass.cs.dispersible.db.AppDao;
 import edu.umass.cs.dispersible.models.DispersibleAppRequest;
 import edu.umass.cs.dispersible.models.DispersiblePacketType;
 import edu.umass.cs.gigapaxos.interfaces.Replicable;
@@ -12,10 +14,16 @@ import edu.umass.cs.reconfiguration.interfaces.Reconfigurable;
 import edu.umass.cs.reconfiguration.interfaces.ReconfigurableRequest;
 import edu.umass.cs.reconfiguration.interfaces.ReplicableRequest;
 import edu.umass.cs.reconfiguration.reconfigurationutils.RequestParseException;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
@@ -29,13 +37,23 @@ import org.json.JSONObject;
  */
 public class DispersibleApp implements Replicable, Reconfigurable {
 
-  private static final String DYNAMIC_CLASS_PATH = "file:DynamicClasses/";
-  private static final String CHECKPOINT_FILE = "checkpoint_file";
+  private static final String JAR_DIRECTORY = "AppJars/"; // TODO: make configurable
+
+  private AppDao appDao;
 
   private Map<String, Replicable> apps = new HashMap<>();
 
+  public DispersibleApp() {
+    // TODO: get below from config
+    String host = "127.0.0.1";
+    int port = 9042;
+    String keyspace = "dispersibility";
+    appDao = new AppDao(host, port, keyspace);
+  }
+
   @Override
   public boolean execute(Request request, boolean doNotReplyToClient) {
+    System.out.println("Request received : " + request);
     if (!(request instanceof DispersibleAppRequest)) {
       throw new IllegalArgumentException("Incompatible request received");
     }
@@ -45,7 +63,7 @@ public class DispersibleApp implements Replicable, Reconfigurable {
     IntegerPacketType requestType = appRequest.getRequestType();
     if (requestType == NEW_APP) {
       String serviceName = appRequest.getServiceName();
-      Optional<Replicable> appForService = getAppForService(serviceName);
+      Optional<Replicable> appForService = loadAppForService(serviceName);
       if (!appForService.isPresent()) {
         System.out.println("Unable to find app for service : " + serviceName);
         appRequest.setResponseCode(UNABLE_TO_CREATE_APP);
@@ -69,7 +87,7 @@ public class DispersibleApp implements Replicable, Reconfigurable {
       return true;
     }
 
-    Replicable app = getAppForService(serviceName).orElse(null);
+    Replicable app = apps.get(serviceName);
     assert app != null; // App must be present for the service at this stage
 
     try {
@@ -99,7 +117,7 @@ public class DispersibleApp implements Replicable, Reconfigurable {
       return true;
     }
 
-    return getAppForService(name)
+    return loadAppForService(name)
         .map(app -> app.restore(name, state))
         .orElse(false);
   }
@@ -142,7 +160,7 @@ public class DispersibleApp implements Replicable, Reconfigurable {
       DispersibleAppRequest request = new DispersibleAppRequest(jsonObject);
 
       if (request.getRequestType() == EXECUTE) {
-        Replicable app = getAppForService(request.getServiceName())
+        Replicable app = loadAppForService(request.getServiceName())
             .orElseThrow(() -> new RequestParseException(new Exception("No app found for request : " + request)));
 
         ReplicableRequest userRequest = (ReplicableRequest) app
@@ -157,46 +175,53 @@ public class DispersibleApp implements Replicable, Reconfigurable {
     }
   }
 
-  private Optional<Replicable> getAppForService(String serviceName) {
-    Replicable app = apps.get(serviceName);
+  private Optional<Replicable> loadAppForService(String serviceName) {
+    Replicable replicableApp = apps.get(serviceName);
 
-    if (app != null) {
-      return Optional.of(app);
+    if (replicableApp != null) {
+      return Optional.of(replicableApp);
     }
 
-    String className = serviceName + ".class";
-    if (!downloadClass(className)) {
+    App app = appDao.getByServiceName(serviceName).orElse(null);
+
+    if (app == null) {
       return Optional.empty();
     }
 
-    String requestClassName = serviceName + "Request.class";
-    if (!downloadClass(requestClassName)) {
-      // If request class is not found, still return empty as it won't be possible to execute
-      // the request
-      return Optional.empty();
+    Path filePath = Paths.get(JAR_DIRECTORY, app.getJarFileName());
+
+    if (!Files.exists(filePath)) {
+      createFile(filePath, app.getJar());
     }
 
     try {
-      URLClassLoader classLoader = new URLClassLoader (
-          new URL[] {new URL(DYNAMIC_CLASS_PATH)}, DispersibleApp.class.getClassLoader());
-      Class<?> clazz = Class.forName(serviceName, true, classLoader);
-      app = (Replicable) clazz.newInstance();
-      apps.put(serviceName, app);
-      return Optional.of(app);
-    } catch (MalformedURLException | IllegalAccessException | InstantiationException
-        | ClassNotFoundException e) {
+      replicableApp = initializeReplicableClassFromJar(filePath, app.getAppClassName());
+      apps.put(serviceName, replicableApp);
+      return Optional.of(replicableApp);
+    } catch (ClassNotFoundException | IllegalAccessException | MalformedURLException | InstantiationException e) {
       e.printStackTrace();
-      throw new IllegalStateException("Unable to instantiate class : " + className);
+      return Optional.empty();
     }
   }
 
-  private boolean downloadClass(String className) {
-    if (Files.exists(Paths.get(className))) {
-      return true;
+  private void createFile(Path filePath, ByteBuffer content) {
+    try {
+      BufferedOutputStream stream =
+          new BufferedOutputStream(new FileOutputStream(new File(filePath.toString())));
+      stream.write(content.array());
+      stream.close();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
-    // todo: if found in dropbox/DB and able to download it return true
+  }
 
-    return false;
+  private Replicable initializeReplicableClassFromJar(Path jarFilePath, String className)
+      throws ClassNotFoundException, IllegalAccessException, InstantiationException,
+             MalformedURLException {
+    File myJar = new File(jarFilePath.toString());
+    URLClassLoader child = new URLClassLoader(new URL[]{myJar.toURI().toURL()}, this.getClass().getClassLoader());
+    Class classToLoad = Class.forName(className, true, child);
+    return (Replicable) classToLoad.newInstance();
   }
 
   @Override
