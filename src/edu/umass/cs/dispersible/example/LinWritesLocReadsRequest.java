@@ -1,10 +1,10 @@
 package edu.umass.cs.dispersible.example;
 
+import edu.umass.cs.dispersible.models.DispersibleRequest;
 import edu.umass.cs.gigapaxos.interfaces.ClientRequest;
 import edu.umass.cs.gigapaxos.paxospackets.RequestPacket;
-import edu.umass.cs.nio.JSONPacket;
 import edu.umass.cs.nio.interfaces.IntegerPacketType;
-import edu.umass.cs.reconfiguration.interfaces.ReplicableRequest;
+import edu.umass.cs.reconfiguration.examples.linwrites.SimpleAppRequest;
 import java.util.HashMap;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -22,8 +22,7 @@ import org.json.JSONObject;
  *         unnecessary as applications can simply encapsulate requests as
  *         {@link RequestPacket}.
  */
-public class LinWritesLocReadsRequest extends JSONPacket implements
-                                                 ReplicableRequest, ClientRequest {
+public class LinWritesLocReadsRequest extends DispersibleRequest {
 
   /**
    * Packet type class for example application requests.
@@ -47,7 +46,6 @@ public class LinWritesLocReadsRequest extends JSONPacket implements
           PacketType.numbers.put(type.number, type);
         } else {
           String error = "Duplicate or inconsistent enum type";
-          assert (false) : error;
           throw new RuntimeException(error);
         }
       }
@@ -80,17 +78,11 @@ public class LinWritesLocReadsRequest extends JSONPacket implements
    *
    */
   public enum Keys {
-    SERVICE_NAME, EPOCH, REQUEST_ID, REQUEST_VALUE, STOP, ACK, RESPONSE_VALUE
-  };
-
-  // name of the replicated state machine
-  private final String name;
+    EPOCH, REQUEST_VALUE, STOP, ACK, RESPONSE_VALUE
+  }
 
   // epoch number (nonzero if reconfigured)
   private final int epoch;
-
-  // request identifier
-  private final long requestID;
 
   // request value
   private final String value;
@@ -104,54 +96,33 @@ public class LinWritesLocReadsRequest extends JSONPacket implements
 
 
   /**
-   * @param name Name of RSM
    * @param epoch Number of time RSM has been reconfigured
-   * @param id Request identifier
    * @param value Request value
    * @param type Request type
    * @param stop Whether the RSM should be stopped entirely
    */
-  public LinWritesLocReadsRequest(String name, int epoch, long id, String value,
-                          IntegerPacketType type, boolean stop) {
+  public LinWritesLocReadsRequest(int epoch, String value, IntegerPacketType type, boolean stop) {
     super(type);
-    this.name = name;
     this.epoch = epoch;
-    this.requestID = id;
     this.stop = stop;
     this.value = value;
   }
 
   /**
-   * @param name
    * @param value
    * @param type
    */
-  public LinWritesLocReadsRequest(String name, String value, IntegerPacketType type) {
-    this(name,value, type,false);
+  public LinWritesLocReadsRequest(String value, IntegerPacketType type) {
+    this(value, type,false);
   }
 
   /**
-   * @param name
    * @param value
    * @param type
    * @param stop
    */
-  public LinWritesLocReadsRequest(String name, String value, IntegerPacketType type,
-                          boolean stop) {
-    this(name, 0, (long) (Math.random() * Long.MAX_VALUE), value, type,
-         stop);
-  }
-
-  /**
-   * @param name
-   * @param id
-   * @param value
-   * @param type
-   * @param stop
-   */
-  public LinWritesLocReadsRequest(String name, long id, String value,
-                          IntegerPacketType type, boolean stop) {
-    this(name, 0, id, value, type, stop);
+  public LinWritesLocReadsRequest(String value, IntegerPacketType type, boolean stop) {
+    this(0, value, type, stop);
   }
 
 
@@ -161,29 +132,14 @@ public class LinWritesLocReadsRequest extends JSONPacket implements
    */
   public LinWritesLocReadsRequest(JSONObject json) throws JSONException {
     super(json);
-    this.name = json.getString(
-        Keys.SERVICE_NAME.toString());
-    this.epoch = json.getInt(Keys
-                                 .EPOCH.toString());
-    this.requestID = json.getLong(
-        Keys.REQUEST_ID.toString());
-
-
-    this.stop = json.getBoolean(
-        Keys.STOP.toString());
-    this.value = json.getString(
-        Keys.REQUEST_VALUE.toString());
+    this.epoch = json.getInt(Keys.EPOCH.toString());
+    this.stop = json.getBoolean(Keys.STOP.toString());
+    this.value = json.getString(Keys.REQUEST_VALUE.toString());
   }
 
   @Override
   public IntegerPacketType getRequestType() {
-    return PacketType
-        .getPacketType(this.type);
-  }
-
-  @Override
-  public String getServiceName() {
-    return this.name;
+    return PacketType.getPacketType(this.type);
   }
 
   /**
@@ -193,18 +149,9 @@ public class LinWritesLocReadsRequest extends JSONPacket implements
     return this.value;
   }
 
-  /**
-   * @return Unique request ID.
-   */
-  public long getRequestID() {
-    return this.requestID;
-  }
-
   public JSONObject toJSONObjectImpl() throws JSONException {
     JSONObject json = new JSONObject();
-    json.put(Keys.SERVICE_NAME.toString(), this.name);
     json.put(Keys.EPOCH.toString(), this.epoch);
-    json.put(Keys.REQUEST_ID.toString(), this.requestID);
     json.put(Keys.STOP.toString(), this.stop);
     json.put(Keys.REQUEST_VALUE.toString(), this.value);
     return json;
@@ -217,14 +164,11 @@ public class LinWritesLocReadsRequest extends JSONPacket implements
 
   @Override
   public ClientRequest getResponse() {
-    return new edu.umass.cs.reconfiguration.examples.linwrites.SimpleAppRequest(this.name, this.epoch, this.requestID,
-                                                                                this.response==null ? Keys.ACK.toString() : this.response, PacketType
-                                                                                    .getPacketType(type), this.stop);
+    return new SimpleAppRequest(getServiceName(), this.epoch, getRequestID(),
+                                this.response == null ? Keys.ACK.toString() : this.response,
+                                PacketType.getPacketType(type), this.stop);
   }
 
-  /**
-   * @param response
-   */
   public LinWritesLocReadsRequest setResponse(String response) {
     this.response = response;
     return this;
